@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Docker and local runtime
+.env
+*.env
+!*.env.example
+docker-compose.override.yml
+logs/*
+!logs/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.code-workspace
+
+# Secrets and local config
+config.yaml
+secrets/

@@ -1,0 +1,21 @@
+allowed_flows:
+  - "AI - Presence test"
+  - "AI - Avondmodus"
+  - "AI - Nachtmodus"
+  - "AI - Alles uit beneden"
+  - "AI - Status huis"
+
+blocked_keywords:
+  - "slot"
+  - "alarm uitschakelen"
+  - "garagedeur openen"
+  - "3d printer starten"
+  - "kachel aan"
+
+command_map:
+  "test presence": "AI - Presence test"
+  "presence test": "AI - Presence test"
+  "avondmodus": "AI - Avondmodus"
+  "nachtmodus": "AI - Nachtmodus"
+  "alles uit beneden": "AI - Alles uit beneden"
+  "status huis": "AI - Status huis"
