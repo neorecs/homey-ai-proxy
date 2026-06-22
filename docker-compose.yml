@@ -4,7 +4,8 @@ services:
     container_name: homey-ai-proxy
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
