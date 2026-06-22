@@ -5,8 +5,15 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+  --trusted-host pypi.org \
+  --trusted-host files.pythonhosted.org \
+  -r requirements.txt
 
 COPY app ./app
 COPY config.yaml.example ./config.yaml.example
