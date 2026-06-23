@@ -6,6 +6,21 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      APP_PORT: ${APP_PORT:-8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: ${LOG_FILE:-/app/logs/homey-ai-proxy.log}
+      CONFIG_PATH: ${CONFIG_PATH:-/app/config.yaml}
+      HOMEY_BASE_URL: ${HOMEY_BASE_URL:-http://homey.local}
+      HOMEY_TOKEN: ${HOMEY_TOKEN:-}
+      HOMEY_USE_MOCK: ${HOMEY_USE_MOCK:-true}
+      HOMEY_MAX_REQUESTS_PER_MINUTE: ${HOMEY_MAX_REQUESTS_PER_MINUTE:-5}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-60}
+      COMMAND_DEBOUNCE_SECONDS: ${COMMAND_DEBOUNCE_SECONDS:-10}
+      HOMEY_RETRY_ATTEMPTS: ${HOMEY_RETRY_ATTEMPTS:-3}
+      HOMEY_RETRY_BASE_DELAY_SECONDS: ${HOMEY_RETRY_BASE_DELAY_SECONDS:-0.5}
+      OPENAI_ENABLED: ${OPENAI_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
