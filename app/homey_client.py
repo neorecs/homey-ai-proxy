@@ -1,6 +1,8 @@
 import asyncio
+import ipaddress
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -19,6 +21,10 @@ class HomeyAuthError(HomeyClientError):
 
 
 class HomeyRateLimitError(HomeyClientError):
+    pass
+
+
+class HomeyConfigurationError(HomeyClientError):
     pass
 
 
@@ -68,11 +74,47 @@ class HttpHomeyClient(BaseHomeyClient):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.base_url = settings.homey_base_url.rstrip("/")
+        self._validate_local_transport()
         self.headers = {"Authorization": f"Bearer {settings.homey_token}"}
+
+    def _validate_local_transport(self) -> None:
+        if self.settings.homey_transport != "local":
+            raise HomeyConfigurationError("Only HOMEY_TRANSPORT=local is supported")
+
+        parsed = urlparse(self.base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise HomeyConfigurationError("HOMEY_BASE_URL must be a valid local http(s) URL")
+
+        hostname = parsed.hostname.lower()
+        if hostname in {"api.athom.com", "my.homey.app"} or hostname.endswith(".athom.com"):
+            raise HomeyConfigurationError("Cloud Homey endpoints are not allowed for runtime actions")
+
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            if hostname.endswith(".local") or "." not in hostname:
+                return
+            raise HomeyConfigurationError("HOMEY_BASE_URL must point to a local/private Homey address")
+
+        if not (address.is_private or address.is_loopback or address.is_link_local):
+            raise HomeyConfigurationError("HOMEY_BASE_URL must point to a private/local IP address")
+
+    @staticmethod
+    def _error_detail(response: httpx.Response) -> str:
+        try:
+            data = response.json()
+        except ValueError:
+            text = response.text.strip()
+            return text[:160] if text else response.reason_phrase
+        if isinstance(data, dict):
+            return str(data.get("error_description") or data.get("error") or response.reason_phrase)
+        return response.reason_phrase
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         if not self.settings.homey_token:
             raise HomeyAuthError("HOMEY_TOKEN is missing")
+        if self.settings.homey_auth_mode == "oauth2_session":
+            raise HomeyConfigurationError("HOMEY_AUTH_MODE=oauth2_session is not implemented yet")
 
         attempts = max(1, self.settings.homey_retry_attempts)
         delay = self.settings.homey_retry_base_delay_seconds
@@ -88,7 +130,7 @@ class HttpHomeyClient(BaseHomeyClient):
                         **kwargs,
                     )
                 if response.status_code in (401, 403):
-                    raise HomeyAuthError("Homey token was rejected")
+                    raise HomeyAuthError(f"Homey token was rejected: {self._error_detail(response)}")
                 if response.status_code == 429:
                     raise HomeyRateLimitError("Homey rate limit reached")
                 response.raise_for_status()

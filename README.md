@@ -175,9 +175,22 @@ Voor echte Homey-aansturing:
 HOMEY_USE_MOCK=false
 HOMEY_BASE_URL=http://10.5.2.201
 HOMEY_TOKEN=je-homey-token
+HOMEY_TRANSPORT=local
+HOMEY_AUTH_MODE=static_token
 ```
 
 De HTTP-client ondersteunt status, devices, flows en het starten van bestaande flows. Runtime-verkeer hoort lokaal naar Homey Pro te gaan. Afhankelijk van je Homey Pro setup kan de exacte API-route verschillen; test dit eerst met ongevaarlijke `AI -` testflows.
+
+`HOMEY_TRANSPORT=local` is bewust hard afgedwongen: cloud-hosts zoals `api.athom.com` en publieke IP-adressen worden geweigerd als runtime endpoint. OAuth2 mag later alleen worden gebruikt om een sessie/token te verkrijgen; de uiteindelijke Homey API-calls moeten lokaal naar `HOMEY_BASE_URL` blijven gaan.
+
+Voor de latere OAuth2/session route zijn deze variabelen alvast gereserveerd:
+
+```env
+HOMEY_AUTH_MODE=oauth2_session
+HOMEY_OAUTH_CLIENT_ID=
+HOMEY_OAUTH_CLIENT_SECRET=
+HOMEY_OAUTH_REFRESH_TOKEN=
+```
 
 ## Veilig testen
 

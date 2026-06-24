@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import Field
@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     homey_base_url: str = "http://homey.local"
     homey_token: str = ""
     homey_use_mock: bool = True
+    homey_transport: Literal["local"] = "local"
+    homey_auth_mode: Literal["static_token", "oauth2_session"] = "static_token"
+    homey_oauth_client_id: str = ""
+    homey_oauth_client_secret: str = ""
+    homey_oauth_refresh_token: str = ""
     homey_max_requests_per_minute: int = 5
     cache_ttl_seconds: int = 60
     command_debounce_seconds: int = 10
