@@ -25,6 +25,14 @@ homey_queue = HomeyQueue(HomeyRateLimiter(settings.homey_max_requests_per_minute
 devices_cache: TTLCache[list[dict[str, Any]]] = TTLCache(settings.cache_ttl_seconds)
 flows_cache: TTLCache[list[dict[str, Any]]] = TTLCache(settings.cache_ttl_seconds)
 recent_commands: dict[str, float] = {}
+SECRET_PLACEHOLDERS = {
+    "",
+    "replace-with-your-homey-token",
+    "replace-with-your-token",
+    "changeme",
+    "change-me",
+    "todo",
+}
 
 
 class FlowRequest(BaseModel):
@@ -47,18 +55,23 @@ def get_config() -> AppConfig:
     return app_config
 
 
+def has_real_secret(value: str) -> bool:
+    normalized = value.strip().lower()
+    return normalized not in SECRET_PLACEHOLDERS and not normalized.startswith("replace-with-")
+
+
 def homey_auth_configured(current_settings: Settings) -> bool:
     if current_settings.homey_use_mock:
         return True
     if current_settings.homey_auth_mode == "static_token":
-        return bool(current_settings.homey_token)
+        return has_real_secret(current_settings.homey_token)
     if current_settings.homey_auth_mode == "oauth2_session":
-        has_access_token = bool(current_settings.homey_oauth_access_token)
+        has_access_token = has_real_secret(current_settings.homey_oauth_access_token)
         has_refresh_flow = all(
             [
-                current_settings.homey_oauth_client_id,
-                current_settings.homey_oauth_client_secret,
-                current_settings.homey_oauth_refresh_token,
+                has_real_secret(current_settings.homey_oauth_client_id),
+                has_real_secret(current_settings.homey_oauth_client_secret),
+                has_real_secret(current_settings.homey_oauth_refresh_token),
             ]
         )
         return has_access_token or has_refresh_flow

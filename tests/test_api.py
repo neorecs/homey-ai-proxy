@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.main import app, recent_commands
+from app.config import Settings
+from app.main import app, has_real_secret, homey_auth_configured, recent_commands
 
 
 client = TestClient(app)
@@ -23,6 +24,17 @@ def test_homey_readiness_reports_safe_mock_state() -> None:
     response_text = str(body).lower()
     assert "homey_token" not in response_text
     assert "replace-with-your-homey-token" not in response_text
+
+
+def test_homey_auth_configured_rejects_placeholder_static_token() -> None:
+    settings = Settings(
+        homey_use_mock=False,
+        homey_auth_mode="static_token",
+        homey_token="replace-with-your-homey-token",
+    )
+    assert homey_auth_configured(settings) is False
+    assert has_real_secret("session-token") is True
+    assert has_real_secret("replace-with-anything") is False
 
 
 def test_homey_readiness_live_uses_mock_status() -> None:
