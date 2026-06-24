@@ -12,6 +12,12 @@ ChatGPT/Codex
   -> Homey-apparaten
 ```
 
+## Ontwerpprincipe: local-first
+
+Alle normale Homey-acties moeten tussen de Docker-container en Homey Pro lokaal verlopen. De proxy gebruikt dus standaard een lokaal Homey-adres, bijvoorbeeld `http://10.5.2.201`, en laat ChatGPT/Codex nooit direct met Homey praten.
+
+Cloud-authenticatie mag later alleen worden gebruikt om OAuth2-tokens of een Homey-sessie te verkrijgen. Runtime-acties zoals devices ophalen, flows lezen en allowlisted flows starten moeten daarna via de lokale Homey Pro API lopen. Als lokaal verbinden niet lukt, moet de proxy falen in plaats van stilletjes over te schakelen naar cloud-control. Dit voorkomt extra cloudverkeer en helpt request limits vermijden.
+
 De MVP gebruikt veilige defaults:
 
 - alleen flows uit `config.yaml` of flows die beginnen met `AI -` mogen worden gestart;
@@ -167,11 +173,11 @@ Voor echte Homey-aansturing:
 
 ```env
 HOMEY_USE_MOCK=false
-HOMEY_BASE_URL=http://homey.local
+HOMEY_BASE_URL=http://10.5.2.201
 HOMEY_TOKEN=je-homey-token
 ```
 
-De HTTP-client ondersteunt status, devices, flows en het starten van bestaande flows. Afhankelijk van je Homey Pro setup kan de exacte API-route verschillen; test dit eerst met ongevaarlijke `AI -` testflows.
+De HTTP-client ondersteunt status, devices, flows en het starten van bestaande flows. Runtime-verkeer hoort lokaal naar Homey Pro te gaan. Afhankelijk van je Homey Pro setup kan de exacte API-route verschillen; test dit eerst met ongevaarlijke `AI -` testflows.
 
 ## Veilig testen
 
