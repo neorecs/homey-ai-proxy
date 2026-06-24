@@ -13,6 +13,26 @@ def test_health() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_proxy_api_key_protects_homey_endpoints() -> None:
+    from app import main
+
+    main.settings.proxy_api_key = "proxy-secret"
+    try:
+        assert client.get("/health").status_code == 200
+
+        missing_key = client.get("/homey/readiness")
+        assert missing_key.status_code == 401
+
+        wrong_key = client.get("/homey/readiness", headers={"X-API-Key": "wrong"})
+        assert wrong_key.status_code == 401
+
+        correct_key = client.get("/homey/readiness", headers={"X-API-Key": "proxy-secret"})
+        assert correct_key.status_code == 200
+        assert correct_key.json()["proxy_auth_enabled"] is True
+    finally:
+        main.settings.proxy_api_key = ""
+
+
 def test_homey_readiness_reports_safe_mock_state() -> None:
     response = client.get("/homey/readiness")
     assert response.status_code == 200

@@ -1,8 +1,10 @@
 import logging
+import secrets
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.cache import TTLCache
@@ -33,6 +35,7 @@ SECRET_PLACEHOLDERS = {
     "change-me",
     "todo",
 }
+PUBLIC_PATHS = {"/health"}
 
 
 class FlowRequest(BaseModel):
@@ -58,6 +61,10 @@ def get_config() -> AppConfig:
 def has_real_secret(value: str) -> bool:
     normalized = value.strip().lower()
     return normalized not in SECRET_PLACEHOLDERS and not normalized.startswith("replace-with-")
+
+
+def proxy_auth_enabled(current_settings: Settings) -> bool:
+    return has_real_secret(current_settings.proxy_api_key)
 
 
 def homey_auth_configured(current_settings: Settings) -> bool:
@@ -109,6 +116,7 @@ def homey_readiness_snapshot(current_settings: Settings, config: AppConfig) -> d
         "homey_base_url": current_settings.homey_base_url,
         "homey_transport": current_settings.homey_transport,
         "homey_auth_mode": current_settings.homey_auth_mode,
+        "proxy_auth_enabled": proxy_auth_enabled(current_settings),
         "auth_configured": auth_configured,
         "allowlist_configured": allowlist_configured,
         "allowed_flow_count": len(config.allowed_flows),
@@ -124,6 +132,19 @@ async def request_logging(request: Request, call_next):
     response = await call_next(request)
     logger.info("Request completed method=%s path=%s status=%s", request.method, request.url.path, response.status_code)
     return response
+
+
+@app.middleware("http")
+async def proxy_api_key_auth(request: Request, call_next):
+    if request.url.path in PUBLIC_PATHS or not proxy_auth_enabled(settings):
+        return await call_next(request)
+
+    provided_key = request.headers.get("x-api-key", "")
+    if not secrets.compare_digest(provided_key, settings.proxy_api_key):
+        logger.warning("Proxy API key rejected method=%s path=%s", request.method, request.url.path)
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+
+    return await call_next(request)
 
 
 @app.get("/health")

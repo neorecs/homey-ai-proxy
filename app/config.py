@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_file: str = "/app/logs/homey-ai-proxy.log"
     config_path: str = "/app/config.yaml"
+    proxy_api_key: str = ""
     homey_base_url: str = "http://homey.local"
     homey_token: str = ""
     homey_use_mock: bool = True

@@ -85,11 +85,14 @@ De compose-file mount `./logs:/app/logs`, zodat logs buiten de container bewaard
 Zet echte tokens alleen in `.env`:
 
 ```env
+PROXY_API_KEY=kies-een-lange-random-api-key
 HOMEY_TOKEN=je-echte-homey-token
 OPENAI_API_KEY=alleen-als-openai-enabled-true-is
 ```
 
 Commit nooit `.env` of `config.yaml` met privégegevens. Deze bestanden staan bewust in `.gitignore`. Gebruik alleen `.env.example` en `config.yaml.example` als voorbeelden.
+
+`PROXY_API_KEY` is optioneel voor lokaal ontwikkelen, maar aanbevolen zodra je echte Homey-acties toestaat. Als deze waarde is gezet, moet elke Homey API-call de header `X-API-Key` meesturen. `/health` blijft zonder key beschikbaar voor Docker-healthchecks.
 
 ## Allowlist aanpassen
 
@@ -117,33 +120,34 @@ curl http://localhost:8000/health
 Homey status:
 
 ```bash
-curl http://localhost:8000/homey/status
+curl -H "X-API-Key: jouw-proxy-api-key" http://localhost:8000/homey/status
 ```
 
 Homey readiness zonder flows te starten:
 
 ```bash
-curl http://localhost:8000/homey/readiness
-curl "http://localhost:8000/homey/readiness?live=true"
+curl -H "X-API-Key: jouw-proxy-api-key" http://localhost:8000/homey/readiness
+curl -H "X-API-Key: jouw-proxy-api-key" "http://localhost:8000/homey/readiness?live=true"
 ```
 
 Devices met cache:
 
 ```bash
-curl "http://localhost:8000/homey/devices?zone=Woonkamer&type=light"
-curl "http://localhost:8000/homey/devices?refresh=true"
+curl -H "X-API-Key: jouw-proxy-api-key" "http://localhost:8000/homey/devices?zone=Woonkamer&type=light"
+curl -H "X-API-Key: jouw-proxy-api-key" "http://localhost:8000/homey/devices?refresh=true"
 ```
 
 Flows:
 
 ```bash
-curl http://localhost:8000/homey/flows
+curl -H "X-API-Key: jouw-proxy-api-key" http://localhost:8000/homey/flows
 ```
 
 Flow starten:
 
 ```bash
 curl -X POST http://localhost:8000/homey/flows/start \
+  -H "X-API-Key: jouw-proxy-api-key" \
   -H "Content-Type: application/json" \
   -d "{\"flow_name\":\"AI - Presence test\"}"
 ```
@@ -152,6 +156,7 @@ Natuurlijke opdracht:
 
 ```bash
 curl -X POST http://localhost:8000/homey/command \
+  -H "X-API-Key: jouw-proxy-api-key" \
   -H "Content-Type: application/json" \
   -d "{\"command\":\"test presence\"}"
 ```

@@ -11,6 +11,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FILE: ${LOG_FILE:-/app/logs/homey-ai-proxy.log}
       CONFIG_PATH: ${CONFIG_PATH:-/app/config.yaml}
+      PROXY_API_KEY: ${PROXY_API_KEY:-}
       HOMEY_BASE_URL: ${HOMEY_BASE_URL:-http://homey.local}
       HOMEY_TOKEN: ${HOMEY_TOKEN:-}
       HOMEY_USE_MOCK: ${HOMEY_USE_MOCK:-true}
