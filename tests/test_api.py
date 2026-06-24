@@ -163,7 +163,8 @@ def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
         assert str(request.url) == "https://api.athom.com/oauth2/token"
         assert request.method == "POST"
         assert request.headers["authorization"].startswith("Basic ")
-        assert b"authorization_code=oauth-code" in request.content
+        assert b"code=oauth-code" in request.content
+        assert b"authorization_code=oauth-code" not in request.content
         assert b"redirect_uri=http%3A%2F%2Fproxy%2Fhomey%2Foauth%2Fcallback" in request.content
         return httpx.Response(
             200,

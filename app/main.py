@@ -285,7 +285,7 @@ async def homey_oauth_callback(code: str = "", state: str = "") -> dict[str, Any
             },
             data={
                 "grant_type": "authorization_code",
-                "authorization_code": code,
+                "code": code,
                 "redirect_uri": settings.homey_oauth_redirect_uri,
             },
         )
