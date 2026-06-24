@@ -12,6 +12,27 @@ def test_health() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_homey_readiness_reports_safe_mock_state() -> None:
+    response = client.get("/homey/readiness")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mock_mode"] is True
+    assert body["auth_configured"] is True
+    assert body["ready_for_live_test"] is False
+    assert body["live"] is None
+    response_text = str(body).lower()
+    assert "homey_token" not in response_text
+    assert "replace-with-your-homey-token" not in response_text
+
+
+def test_homey_readiness_live_uses_mock_status() -> None:
+    response = client.get("/homey/readiness?live=true")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["live"]["ok"] is True
+    assert body["live"]["homey"]["mode"] == "mock"
+
+
 def test_flow_start_endpoint_uses_mock_homey() -> None:
     response = client.post("/homey/flows/start", json={"flow_name": "AI - Presence test"})
     assert response.status_code == 200

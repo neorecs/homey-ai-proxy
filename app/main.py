@@ -47,6 +47,64 @@ def get_config() -> AppConfig:
     return app_config
 
 
+def homey_auth_configured(current_settings: Settings) -> bool:
+    if current_settings.homey_use_mock:
+        return True
+    if current_settings.homey_auth_mode == "static_token":
+        return bool(current_settings.homey_token)
+    if current_settings.homey_auth_mode == "oauth2_session":
+        has_access_token = bool(current_settings.homey_oauth_access_token)
+        has_refresh_flow = all(
+            [
+                current_settings.homey_oauth_client_id,
+                current_settings.homey_oauth_client_secret,
+                current_settings.homey_oauth_refresh_token,
+            ]
+        )
+        return has_access_token or has_refresh_flow
+    return False
+
+
+def homey_readiness_snapshot(current_settings: Settings, config: AppConfig) -> dict[str, Any]:
+    auth_configured = homey_auth_configured(current_settings)
+    allowlist_configured = bool(config.allowed_flows)
+    command_map_configured = bool(config.command_map)
+    local_runtime_configured = current_settings.homey_transport == "local" and not current_settings.homey_use_mock
+    ready_for_live_test = (
+        local_runtime_configured
+        and auth_configured
+        and allowlist_configured
+        and command_map_configured
+    )
+
+    next_step = "Switch HOMEY_USE_MOCK=false only after Homey auth is configured."
+    if current_settings.homey_use_mock:
+        if auth_configured:
+            next_step = "Set HOMEY_USE_MOCK=false and run /homey/readiness?live=true."
+    elif not auth_configured:
+        next_step = "Configure Homey auth before testing live Homey calls."
+    elif not allowlist_configured:
+        next_step = "Add safe flows to config.yaml allowed_flows."
+    elif not command_map_configured:
+        next_step = "Add safe natural-language commands to config.yaml command_map."
+    else:
+        next_step = "Run /homey/readiness?live=true, then test POST /homey/command with test presence."
+
+    return {
+        "ready_for_live_test": ready_for_live_test,
+        "mock_mode": current_settings.homey_use_mock,
+        "homey_base_url": current_settings.homey_base_url,
+        "homey_transport": current_settings.homey_transport,
+        "homey_auth_mode": current_settings.homey_auth_mode,
+        "auth_configured": auth_configured,
+        "allowlist_configured": allowlist_configured,
+        "allowed_flow_count": len(config.allowed_flows),
+        "command_map_configured": command_map_configured,
+        "command_count": len(config.command_map),
+        "next_step": next_step,
+    }
+
+
 @app.middleware("http")
 async def request_logging(request: Request, call_next):
     logger.info("Incoming request method=%s path=%s", request.method, request.url.path)
@@ -75,6 +133,23 @@ async def homey_status(client: BaseHomeyClient = Depends(get_client)) -> dict[st
             "ttl_seconds": settings.cache_ttl_seconds,
         },
     }
+
+
+@app.get("/homey/readiness")
+async def homey_readiness(
+    live: bool = False,
+    client: BaseHomeyClient = Depends(get_client),
+    config: AppConfig = Depends(get_config),
+) -> dict[str, Any]:
+    snapshot = homey_readiness_snapshot(settings, config)
+    live_result: dict[str, Any] | None = None
+    if live:
+        try:
+            live_status = await homey_queue.run(client.status)
+            live_result = {"ok": True, "homey": live_status}
+        except HomeyClientError as exc:
+            live_result = {"ok": False, "error": str(exc)}
+    return {"timestamp": utc_now(), **snapshot, "live": live_result}
 
 
 def filter_items(

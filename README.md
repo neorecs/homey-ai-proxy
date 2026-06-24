@@ -120,6 +120,13 @@ Homey status:
 curl http://localhost:8000/homey/status
 ```
 
+Homey readiness zonder flows te starten:
+
+```bash
+curl http://localhost:8000/homey/readiness
+curl "http://localhost:8000/homey/readiness?live=true"
+```
+
 Devices met cache:
 
 ```bash
@@ -205,6 +212,16 @@ De runtime guard blijft actief: `HOMEY_BASE_URL` mag niet naar Athom/Homey cloud
 ## Veilig testen
 
 Begin altijd met `HOMEY_USE_MOCK=true`. Test daarna alleen met een ongevaarlijke flow zoals `AI - Presence test`. Voeg pas extra flows toe wanneer je zeker weet dat ze veilig zijn.
+
+Veilige live-testvolgorde:
+
+1. Zet `HOMEY_BASE_URL=http://10.5.2.201`.
+2. Laat `HOMEY_TRANSPORT=local` staan.
+3. Vul een geldige Homey auth mode in.
+4. Controleer `GET /homey/readiness`.
+5. Zet pas daarna `HOMEY_USE_MOCK=false`.
+6. Test `GET /homey/readiness?live=true`.
+7. Test daarna pas `POST /homey/command` met `{"command":"test presence"}`.
 
 ## Tests draaien
 
