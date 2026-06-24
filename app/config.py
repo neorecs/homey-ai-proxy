@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     homey_oauth_client_id: str = ""
     homey_oauth_client_secret: str = ""
     homey_oauth_refresh_token: str = ""
+    homey_oauth_access_token: str = ""
     homey_max_requests_per_minute: int = 5
     cache_ttl_seconds: int = 60
     command_debounce_seconds: int = 10

@@ -190,7 +190,17 @@ HOMEY_AUTH_MODE=oauth2_session
 HOMEY_OAUTH_CLIENT_ID=
 HOMEY_OAUTH_CLIENT_SECRET=
 HOMEY_OAUTH_REFRESH_TOKEN=
+HOMEY_OAUTH_ACCESS_TOKEN=
 ```
+
+In `oauth2_session` mode gebruikt de proxy de Homey Web API alleen voor authenticatie:
+
+1. bestaande `HOMEY_OAUTH_ACCESS_TOKEN` gebruiken, of een refresh token omwisselen voor een cloud access token;
+2. delegation token aanvragen met audience `homey`;
+3. met dat delegation token lokaal inloggen op `HOMEY_BASE_URL/api/manager/users/login`;
+4. alle daarna volgende manager API-calls lokaal uitvoeren met de lokale session token.
+
+De runtime guard blijft actief: `HOMEY_BASE_URL` mag niet naar Athom/Homey cloud wijzen. Een access token is vooral handig voor tijdelijk testen; voor langdurig draaien is een refresh token met OAuth2 clientgegevens nodig.
 
 ## Veilig testen
 

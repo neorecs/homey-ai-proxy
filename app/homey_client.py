@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import ipaddress
 import logging
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -70,12 +72,119 @@ class MockHomeyClient(BaseHomeyClient):
         return {"success": True, "flow_name": flow_name, "mode": "mock"}
 
 
+class HomeyOAuthSessionProvider:
+    def __init__(self, settings: Settings, base_url: str) -> None:
+        self.settings = settings
+        self.base_url = base_url
+        self._access_token = settings.homey_oauth_access_token
+        self._access_expires_at = time.monotonic() + 300 if self._access_token else 0.0
+        self._session_token = ""
+        self._lock = asyncio.Lock()
+
+    def _validate_refresh_settings(self) -> None:
+        missing = [
+            name
+            for name, value in {
+                "HOMEY_OAUTH_CLIENT_ID": self.settings.homey_oauth_client_id,
+                "HOMEY_OAUTH_CLIENT_SECRET": self.settings.homey_oauth_client_secret,
+                "HOMEY_OAUTH_REFRESH_TOKEN": self.settings.homey_oauth_refresh_token,
+            }.items()
+            if not value
+        ]
+        if missing:
+            raise HomeyConfigurationError(f"Missing OAuth2 settings: {', '.join(missing)}")
+
+    def _validate_any_token_source(self) -> None:
+        if self._access_token:
+            return
+        self._validate_refresh_settings()
+
+    @property
+    def _basic_auth_header(self) -> str:
+        raw = f"{self.settings.homey_oauth_client_id}:{self.settings.homey_oauth_client_secret}"
+        encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+        return f"Basic {encoded}"
+
+    async def _refresh_access_token(self) -> str:
+        self._validate_refresh_settings()
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                "https://api.athom.com/oauth2/token",
+                headers={
+                    "Authorization": self._basic_auth_header,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.settings.homey_oauth_refresh_token,
+                },
+            )
+        if response.status_code in (401, 403):
+            raise HomeyAuthError(f"Homey OAuth2 refresh failed: {HttpHomeyClient._error_detail(response)}")
+        response.raise_for_status()
+        data = response.json()
+        self._access_token = data["access_token"]
+        expires_in = int(data.get("expires_in") or 3600)
+        self._access_expires_at = time.monotonic() + max(60, expires_in - 60)
+        return self._access_token
+
+    async def _get_access_token(self) -> str:
+        self._validate_any_token_source()
+        if self._access_token and time.monotonic() < self._access_expires_at:
+            return self._access_token
+        return await self._refresh_access_token()
+
+    async def _create_delegation_token(self, access_token: str) -> str:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                "https://api.athom.com/delegation/token?audience=homey",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        if response.status_code in (401, 403):
+            raise HomeyAuthError(f"Homey delegation token failed: {HttpHomeyClient._error_detail(response)}")
+        response.raise_for_status()
+        token = response.json()
+        if not isinstance(token, str) or not token:
+            raise HomeyAuthError("Homey delegation token response was invalid")
+        return token
+
+    async def _create_local_session_token(self, delegation_token: str) -> str:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                f"{self.base_url}/api/manager/users/login",
+                json={"token": delegation_token},
+            )
+        if response.status_code in (401, 403):
+            raise HomeyAuthError(f"Homey local session login failed: {HttpHomeyClient._error_detail(response)}")
+        response.raise_for_status()
+        token = response.json()
+        if not isinstance(token, str) or not token:
+            raise HomeyAuthError("Homey local session response was invalid")
+        return token
+
+    async def get_session_token(self, force_refresh: bool = False) -> str:
+        async with self._lock:
+            if self._session_token and not force_refresh:
+                return self._session_token
+            access_token = await self._get_access_token()
+            delegation_token = await self._create_delegation_token(access_token)
+            self._session_token = await self._create_local_session_token(delegation_token)
+            return self._session_token
+
+    def clear_session(self) -> None:
+        self._session_token = ""
+
+
 class HttpHomeyClient(BaseHomeyClient):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.base_url = settings.homey_base_url.rstrip("/")
         self._validate_local_transport()
-        self.headers = {"Authorization": f"Bearer {settings.homey_token}"}
+        self._oauth_session_provider = (
+            HomeyOAuthSessionProvider(settings, self.base_url)
+            if settings.homey_auth_mode == "oauth2_session"
+            else None
+        )
 
     def _validate_local_transport(self) -> None:
         if self.settings.homey_transport != "local":
@@ -111,10 +220,12 @@ class HttpHomeyClient(BaseHomeyClient):
         return response.reason_phrase
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        if not self.settings.homey_token:
-            raise HomeyAuthError("HOMEY_TOKEN is missing")
         if self.settings.homey_auth_mode == "oauth2_session":
-            raise HomeyConfigurationError("HOMEY_AUTH_MODE=oauth2_session is not implemented yet")
+            token = await self._oauth_session_provider.get_session_token()
+        elif self.settings.homey_token:
+            token = self.settings.homey_token
+        else:
+            raise HomeyAuthError("HOMEY_TOKEN is missing")
 
         attempts = max(1, self.settings.homey_retry_attempts)
         delay = self.settings.homey_retry_base_delay_seconds
@@ -126,10 +237,14 @@ class HttpHomeyClient(BaseHomeyClient):
                     response = await client.request(
                         method,
                         f"{self.base_url}{path}",
-                        headers=self.headers,
+                        headers={"Authorization": f"Bearer {token}"},
                         **kwargs,
                     )
                 if response.status_code in (401, 403):
+                    if self._oauth_session_provider is not None and attempt == 1:
+                        self._oauth_session_provider.clear_session()
+                        token = await self._oauth_session_provider.get_session_token(force_refresh=True)
+                        continue
                     raise HomeyAuthError(f"Homey token was rejected: {self._error_detail(response)}")
                 if response.status_code == 429:
                     raise HomeyRateLimitError("Homey rate limit reached")
