@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
+import httpx
 
 from app.config import Settings
-from app.main import app, has_real_secret, homey_auth_configured, recent_commands
+from app.main import app, has_real_secret, homey_auth_configured, oauth_states, recent_commands
 
 
 client = TestClient(app)
@@ -87,6 +88,106 @@ def test_homey_readiness_live_uses_mock_status() -> None:
     body = response.json()
     assert body["live"]["ok"] is True
     assert body["live"]["homey"]["mode"] == "mock"
+
+
+def test_homey_oauth_authorize_url_requires_client_config() -> None:
+    from app import main
+
+    previous_client_id = main.settings.homey_oauth_client_id
+    previous_client_secret = main.settings.homey_oauth_client_secret
+    previous_redirect_uri = main.settings.homey_oauth_redirect_uri
+    try:
+        main.settings.homey_oauth_client_id = ""
+        main.settings.homey_oauth_client_secret = ""
+        main.settings.homey_oauth_redirect_uri = ""
+        response = client.get("/homey/oauth/authorize-url")
+        assert response.status_code == 400
+    finally:
+        main.settings.homey_oauth_client_id = previous_client_id
+        main.settings.homey_oauth_client_secret = previous_client_secret
+        main.settings.homey_oauth_redirect_uri = previous_redirect_uri
+
+
+def test_homey_oauth_authorize_url_returns_state() -> None:
+    from app import main
+
+    previous_client_id = main.settings.homey_oauth_client_id
+    previous_client_secret = main.settings.homey_oauth_client_secret
+    previous_redirect_uri = main.settings.homey_oauth_redirect_uri
+    try:
+        main.settings.homey_oauth_client_id = "client-id"
+        main.settings.homey_oauth_client_secret = "client-secret"
+        main.settings.homey_oauth_redirect_uri = "http://proxy/homey/oauth/callback"
+        response = client.get("/homey/oauth/authorize-url")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["state"] in oauth_states
+        assert "https://api.athom.com/oauth2/authorise?" in body["authorization_url"]
+        assert "client_id=client-id" in body["authorization_url"]
+    finally:
+        main.settings.homey_oauth_client_id = previous_client_id
+        main.settings.homey_oauth_client_secret = previous_client_secret
+        main.settings.homey_oauth_redirect_uri = previous_redirect_uri
+
+
+def test_homey_oauth_callback_rejects_unknown_state() -> None:
+    response = client.get("/homey/oauth/callback?code=abc&state=unknown")
+    assert response.status_code == 400
+
+
+def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
+    from app import main
+
+    previous_client_id = main.settings.homey_oauth_client_id
+    previous_client_secret = main.settings.homey_oauth_client_secret
+    previous_redirect_uri = main.settings.homey_oauth_redirect_uri
+    oauth_states.add("known-state")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.athom.com/oauth2/token"
+        assert request.method == "POST"
+        assert request.headers["authorization"].startswith("Basic ")
+        assert b"authorization_code=oauth-code" in request.content
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "cloud-access",
+                "refresh_token": "cloud-refresh",
+                "expires_in": 3600,
+            },
+        )
+
+    real_async_client = httpx.AsyncClient
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.client = real_async_client(transport=httpx.MockTransport(handler))
+
+        async def __aenter__(self):
+            return self.client
+
+        async def __aexit__(self, *args):
+            await self.client.aclose()
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+
+    try:
+        main.settings.homey_oauth_client_id = "client-id"
+        main.settings.homey_oauth_client_secret = "client-secret"
+        main.settings.homey_oauth_redirect_uri = "http://proxy/homey/oauth/callback"
+        response = client.get("/homey/oauth/callback?code=oauth-code&state=known-state")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["env"]["HOMEY_AUTH_MODE"] == "oauth2_session"
+        assert body["env"]["HOMEY_OAUTH_REFRESH_TOKEN"] == "cloud-refresh"
+        assert body["env"]["HOMEY_OAUTH_ACCESS_TOKEN"] == "cloud-access"
+        assert "client-secret" not in str(body)
+    finally:
+        main.settings.homey_oauth_client_id = previous_client_id
+        main.settings.homey_oauth_client_secret = previous_client_secret
+        main.settings.homey_oauth_redirect_uri = previous_redirect_uri
+        oauth_states.discard("known-state")
 
 
 def test_flow_start_endpoint_uses_mock_homey() -> None:

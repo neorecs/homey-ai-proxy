@@ -201,6 +201,7 @@ Voor de latere OAuth2/session route zijn deze variabelen alvast gereserveerd:
 HOMEY_AUTH_MODE=oauth2_session
 HOMEY_OAUTH_CLIENT_ID=
 HOMEY_OAUTH_CLIENT_SECRET=
+HOMEY_OAUTH_REDIRECT_URI=http://10.5.1.150:18080/homey/oauth/callback
 HOMEY_OAUTH_REFRESH_TOKEN=
 HOMEY_OAUTH_ACCESS_TOKEN=
 ```
@@ -213,6 +214,26 @@ In `oauth2_session` mode gebruikt de proxy de Homey Web API alleen voor authenti
 4. alle daarna volgende manager API-calls lokaal uitvoeren met de lokale session token.
 
 De runtime guard blijft actief: `HOMEY_BASE_URL` mag niet naar Athom/Homey cloud wijzen. Een access token is vooral handig voor tijdelijk testen; voor langdurig draaien is een refresh token met OAuth2 clientgegevens nodig.
+
+OAuth2 bootstrap via de proxy:
+
+1. Maak of open je Homey Web API Client.
+2. Zet de redirect URI op `http://10.5.1.150:18080/homey/oauth/callback`.
+3. Zet in Dockhand: `HOMEY_AUTH_MODE=oauth2_session`, `HOMEY_OAUTH_CLIENT_ID`, `HOMEY_OAUTH_CLIENT_SECRET` en `HOMEY_OAUTH_REDIRECT_URI`.
+4. Redeploy de stack.
+5. Haal de autorisatie-url op:
+
+```bash
+curl -H "X-API-Key: jouw-proxy-api-key" http://10.5.1.150:18080/homey/oauth/authorize-url
+```
+
+6. Open `authorization_url` in je browser en keur toegang goed.
+7. De callback geeft `HOMEY_OAUTH_REFRESH_TOKEN` en `HOMEY_OAUTH_ACCESS_TOKEN` terug. Zet deze waarden in Dockhand en redeploy opnieuw.
+8. Test daarna:
+
+```bash
+curl -H "X-API-Key: jouw-proxy-api-key" "http://10.5.1.150:18080/homey/readiness?live=true"
+```
 
 ## Veilig testen
 

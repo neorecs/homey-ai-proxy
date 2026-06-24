@@ -1,8 +1,11 @@
 import logging
 import secrets
+import base64
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -27,6 +30,7 @@ homey_queue = HomeyQueue(HomeyRateLimiter(settings.homey_max_requests_per_minute
 devices_cache: TTLCache[list[dict[str, Any]]] = TTLCache(settings.cache_ttl_seconds)
 flows_cache: TTLCache[list[dict[str, Any]]] = TTLCache(settings.cache_ttl_seconds)
 recent_commands: dict[str, float] = {}
+oauth_states: set[str] = set()
 SECRET_PLACEHOLDERS = {
     "",
     "replace-with-your-homey-token",
@@ -35,7 +39,7 @@ SECRET_PLACEHOLDERS = {
     "change-me",
     "todo",
 }
-PUBLIC_PATHS = {"/health"}
+PUBLIC_PATHS = {"/health", "/homey/oauth/callback"}
 
 
 class FlowRequest(BaseModel):
@@ -65,6 +69,16 @@ def has_real_secret(value: str) -> bool:
 
 def proxy_auth_enabled(current_settings: Settings) -> bool:
     return has_real_secret(current_settings.proxy_api_key)
+
+
+def oauth_client_configured(current_settings: Settings) -> bool:
+    return all(
+        [
+            has_real_secret(current_settings.homey_oauth_client_id),
+            has_real_secret(current_settings.homey_oauth_client_secret),
+            bool(current_settings.homey_oauth_redirect_uri.strip()),
+        ]
+    )
 
 
 def homey_auth_configured(current_settings: Settings) -> bool:
@@ -123,6 +137,7 @@ def homey_readiness_snapshot(current_settings: Settings, config: AppConfig) -> d
         "homey_transport": current_settings.homey_transport,
         "homey_auth_mode": current_settings.homey_auth_mode,
         "proxy_auth_enabled": caller_auth_configured,
+        "oauth_client_configured": oauth_client_configured(current_settings),
         "auth_configured": auth_configured,
         "allowlist_configured": allowlist_configured,
         "allowed_flow_count": len(config.allowed_flows),
@@ -153,9 +168,92 @@ async def proxy_api_key_auth(request: Request, call_next):
     return await call_next(request)
 
 
+def homey_oauth_basic_auth_header(current_settings: Settings) -> str:
+    raw = f"{current_settings.homey_oauth_client_id}:{current_settings.homey_oauth_client_secret}"
+    encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+    return f"Basic {encoded}"
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "timestamp": utc_now()}
+
+
+@app.get("/homey/oauth/authorize-url")
+async def homey_oauth_authorize_url() -> dict[str, Any]:
+    if not oauth_client_configured(settings):
+        raise HTTPException(
+            status_code=400,
+            detail="Configure HOMEY_OAUTH_CLIENT_ID, HOMEY_OAUTH_CLIENT_SECRET and HOMEY_OAUTH_REDIRECT_URI first",
+        )
+
+    state = secrets.token_urlsafe(24)
+    oauth_states.add(state)
+    query = urlencode(
+        {
+            "authorization_type": "code",
+            "client_id": settings.homey_oauth_client_id,
+            "redirect_uri": settings.homey_oauth_redirect_uri,
+            "state": state,
+        }
+    )
+    return {
+        "authorization_url": f"https://api.athom.com/oauth2/authorise?{query}",
+        "redirect_uri": settings.homey_oauth_redirect_uri,
+        "state": state,
+        "next_step": "Open authorization_url, approve Homey access, then let Homey redirect back to this proxy.",
+    }
+
+
+@app.get("/homey/oauth/callback")
+async def homey_oauth_callback(code: str = "", state: str = "") -> dict[str, Any]:
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth2 code or state")
+    if state not in oauth_states:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth2 state")
+    oauth_states.remove(state)
+    if not oauth_client_configured(settings):
+        raise HTTPException(
+            status_code=400,
+            detail="Configure HOMEY_OAUTH_CLIENT_ID, HOMEY_OAUTH_CLIENT_SECRET and HOMEY_OAUTH_REDIRECT_URI first",
+        )
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.post(
+            "https://api.athom.com/oauth2/token",
+            headers={
+                "Authorization": homey_oauth_basic_auth_header(settings),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={
+                "grant_type": "authorization_code",
+                "authorization_code": code,
+            },
+        )
+    if response.status_code in (401, 403):
+        raise HTTPException(status_code=502, detail="Homey OAuth2 code exchange was rejected")
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail="Homey OAuth2 code exchange failed") from exc
+
+    data = response.json()
+    refresh_token = data.get("refresh_token", "")
+    access_token = data.get("access_token", "")
+    if not refresh_token and not access_token:
+        raise HTTPException(status_code=502, detail="Homey OAuth2 response did not include usable tokens")
+
+    return {
+        "success": True,
+        "homey_auth_mode": "oauth2_session",
+        "env": {
+            "HOMEY_AUTH_MODE": "oauth2_session",
+            "HOMEY_OAUTH_REFRESH_TOKEN": refresh_token,
+            "HOMEY_OAUTH_ACCESS_TOKEN": access_token,
+        },
+        "expires_in": data.get("expires_in"),
+        "next_step": "Copy these values into Dockhand environment variables, then redeploy. Do not commit them to Git.",
+    }
 
 
 @app.get("/homey/status")

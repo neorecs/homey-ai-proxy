@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     homey_auth_mode: Literal["static_token", "oauth2_session"] = "static_token"
     homey_oauth_client_id: str = ""
     homey_oauth_client_secret: str = ""
+    homey_oauth_redirect_uri: str = ""
     homey_oauth_refresh_token: str = ""
     homey_oauth_access_token: str = ""
     homey_max_requests_per_minute: int = 5
