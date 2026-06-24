@@ -191,7 +191,7 @@ async def homey_oauth_authorize_url() -> dict[str, Any]:
     oauth_states.add(state)
     query = urlencode(
         {
-            "authorization_type": "code",
+            "response_type": "code",
             "client_id": settings.homey_oauth_client_id,
             "redirect_uri": settings.homey_oauth_redirect_uri,
             "state": state,

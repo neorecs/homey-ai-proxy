@@ -124,6 +124,8 @@ def test_homey_oauth_authorize_url_returns_state() -> None:
         assert body["state"] in oauth_states
         assert "https://api.athom.com/oauth2/authorise?" in body["authorization_url"]
         assert "client_id=client-id" in body["authorization_url"]
+        assert "response_type=code" in body["authorization_url"]
+        assert "authorization_type=code" not in body["authorization_url"]
     finally:
         main.settings.homey_oauth_client_id = previous_client_id
         main.settings.homey_oauth_client_secret = previous_client_secret
