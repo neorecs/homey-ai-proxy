@@ -164,6 +164,7 @@ def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
         assert request.method == "POST"
         assert request.headers["authorization"].startswith("Basic ")
         assert b"authorization_code=oauth-code" in request.content
+        assert b"redirect_uri=http%3A%2F%2Fproxy%2Fhomey%2Foauth%2Fcallback" in request.content
         return httpx.Response(
             200,
             json={
@@ -200,6 +201,50 @@ def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
         assert body["env"]["HOMEY_OAUTH_REFRESH_TOKEN"] == "cloud-refresh"
         assert body["env"]["HOMEY_OAUTH_ACCESS_TOKEN"] == "cloud-access"
         assert "client-secret" not in str(body)
+    finally:
+        main.settings.homey_oauth_client_id = previous_client_id
+        main.settings.homey_oauth_client_secret = previous_client_secret
+        main.settings.homey_oauth_redirect_uri = previous_redirect_uri
+
+
+def test_homey_oauth_callback_returns_safe_error_detail(monkeypatch) -> None:
+    from app import main
+
+    previous_client_id = main.settings.homey_oauth_client_id
+    previous_client_secret = main.settings.homey_oauth_client_secret
+    previous_redirect_uri = main.settings.homey_oauth_redirect_uri
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": "invalid_grant",
+                "error_description": "Authorization code was invalid or expired",
+            },
+        )
+
+    real_async_client = httpx.AsyncClient
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.client = real_async_client(transport=httpx.MockTransport(handler))
+
+        async def __aenter__(self):
+            return self.client
+
+        async def __aexit__(self, *args):
+            await self.client.aclose()
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+
+    try:
+        main.settings.homey_oauth_client_id = "client-id"
+        main.settings.homey_oauth_client_secret = "client-secret"
+        main.settings.homey_oauth_redirect_uri = "http://proxy/homey/oauth/callback"
+        state = main.create_oauth_state(main.settings)
+        response = client.get(f"/homey/oauth/callback?code=oauth-code&state={state}")
+        assert response.status_code == 502
+        assert response.json()["detail"] == "Homey OAuth2 code exchange failed: Authorization code was invalid or expired"
     finally:
         main.settings.homey_oauth_client_id = previous_client_id
         main.settings.homey_oauth_client_secret = previous_client_secret

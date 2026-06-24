@@ -177,6 +177,18 @@ def homey_oauth_basic_auth_header(current_settings: Settings) -> str:
     return f"Basic {encoded}"
 
 
+def safe_homey_error_detail(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        text = response.text.strip()
+        return text[:200] if text else response.reason_phrase
+    if isinstance(data, dict):
+        detail = data.get("error_description") or data.get("error") or response.reason_phrase
+        return str(detail)[:200]
+    return response.reason_phrase
+
+
 def _base64url_encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
@@ -274,14 +286,15 @@ async def homey_oauth_callback(code: str = "", state: str = "") -> dict[str, Any
             data={
                 "grant_type": "authorization_code",
                 "authorization_code": code,
+                "redirect_uri": settings.homey_oauth_redirect_uri,
             },
         )
     if response.status_code in (401, 403):
-        raise HTTPException(status_code=502, detail="Homey OAuth2 code exchange was rejected")
+        raise HTTPException(status_code=502, detail=f"Homey OAuth2 code exchange was rejected: {safe_homey_error_detail(response)}")
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=502, detail="Homey OAuth2 code exchange failed") from exc
+        raise HTTPException(status_code=502, detail=f"Homey OAuth2 code exchange failed: {safe_homey_error_detail(response)}") from exc
 
     data = response.json()
     refresh_token = data.get("refresh_token", "")
