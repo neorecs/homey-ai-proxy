@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 import httpx
 
 from app.config import Settings
-from app.main import app, has_real_secret, homey_auth_configured, oauth_states, recent_commands
+from app.main import app, has_real_secret, homey_auth_configured, recent_commands, validate_oauth_state
 
 
 client = TestClient(app)
@@ -121,7 +121,7 @@ def test_homey_oauth_authorize_url_returns_state() -> None:
         response = client.get("/homey/oauth/authorize-url")
         assert response.status_code == 200
         body = response.json()
-        assert body["state"] in oauth_states
+        assert validate_oauth_state(body["state"], main.settings) is True
         assert "https://api.athom.com/oauth2/authorise?" in body["authorization_url"]
         assert "client_id=client-id" in body["authorization_url"]
         assert "response_type=code" in body["authorization_url"]
@@ -137,13 +137,27 @@ def test_homey_oauth_callback_rejects_unknown_state() -> None:
     assert response.status_code == 400
 
 
+def test_homey_oauth_state_is_stateless() -> None:
+    from app import main
+
+    previous_proxy_key = main.settings.proxy_api_key
+    previous_client_secret = main.settings.homey_oauth_client_secret
+    try:
+        main.settings.proxy_api_key = "proxy-secret"
+        main.settings.homey_oauth_client_secret = "client-secret"
+        state = main.create_oauth_state(main.settings)
+        assert main.validate_oauth_state(state, main.settings) is True
+    finally:
+        main.settings.proxy_api_key = previous_proxy_key
+        main.settings.homey_oauth_client_secret = previous_client_secret
+
+
 def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
     from app import main
 
     previous_client_id = main.settings.homey_oauth_client_id
     previous_client_secret = main.settings.homey_oauth_client_secret
     previous_redirect_uri = main.settings.homey_oauth_redirect_uri
-    oauth_states.add("known-state")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "https://api.athom.com/oauth2/token"
@@ -177,7 +191,8 @@ def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
         main.settings.homey_oauth_client_id = "client-id"
         main.settings.homey_oauth_client_secret = "client-secret"
         main.settings.homey_oauth_redirect_uri = "http://proxy/homey/oauth/callback"
-        response = client.get("/homey/oauth/callback?code=oauth-code&state=known-state")
+        state = main.create_oauth_state(main.settings)
+        response = client.get(f"/homey/oauth/callback?code=oauth-code&state={state}")
         assert response.status_code == 200
         body = response.json()
         assert body["success"] is True
@@ -189,7 +204,6 @@ def test_homey_oauth_callback_exchanges_code(monkeypatch) -> None:
         main.settings.homey_oauth_client_id = previous_client_id
         main.settings.homey_oauth_client_secret = previous_client_secret
         main.settings.homey_oauth_redirect_uri = previous_redirect_uri
-        oauth_states.discard("known-state")
 
 
 def test_flow_start_endpoint_uses_mock_homey() -> None:

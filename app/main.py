@@ -1,6 +1,9 @@
 import logging
 import secrets
 import base64
+import hashlib
+import hmac
+import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode
@@ -30,7 +33,6 @@ homey_queue = HomeyQueue(HomeyRateLimiter(settings.homey_max_requests_per_minute
 devices_cache: TTLCache[list[dict[str, Any]]] = TTLCache(settings.cache_ttl_seconds)
 flows_cache: TTLCache[list[dict[str, Any]]] = TTLCache(settings.cache_ttl_seconds)
 recent_commands: dict[str, float] = {}
-oauth_states: set[str] = set()
 SECRET_PLACEHOLDERS = {
     "",
     "replace-with-your-homey-token",
@@ -40,6 +42,7 @@ SECRET_PLACEHOLDERS = {
     "todo",
 }
 PUBLIC_PATHS = {"/health", "/homey/oauth/callback"}
+OAUTH_STATE_TTL_SECONDS = 15 * 60
 
 
 class FlowRequest(BaseModel):
@@ -174,6 +177,51 @@ def homey_oauth_basic_auth_header(current_settings: Settings) -> str:
     return f"Basic {encoded}"
 
 
+def _base64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _base64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def oauth_state_secret(current_settings: Settings) -> str:
+    if has_real_secret(current_settings.proxy_api_key):
+        return current_settings.proxy_api_key
+    return current_settings.homey_oauth_client_secret
+
+
+def create_oauth_state(current_settings: Settings) -> str:
+    payload = f"{int(time.time())}.{secrets.token_urlsafe(18)}"
+    signature = hmac.new(
+        oauth_state_secret(current_settings).encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return _base64url_encode(f"{payload}.{signature}".encode("utf-8"))
+
+
+def validate_oauth_state(state: str, current_settings: Settings) -> bool:
+    try:
+        decoded = _base64url_decode(state).decode("utf-8")
+        timestamp_text, nonce, provided_signature = decoded.split(".", 2)
+        timestamp = int(timestamp_text)
+    except (ValueError, UnicodeDecodeError):
+        return False
+
+    if not nonce or time.time() - timestamp > OAUTH_STATE_TTL_SECONDS:
+        return False
+
+    payload = f"{timestamp_text}.{nonce}"
+    expected_signature = hmac.new(
+        oauth_state_secret(current_settings).encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(provided_signature, expected_signature)
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "timestamp": utc_now()}
@@ -187,8 +235,7 @@ async def homey_oauth_authorize_url() -> dict[str, Any]:
             detail="Configure HOMEY_OAUTH_CLIENT_ID, HOMEY_OAUTH_CLIENT_SECRET and HOMEY_OAUTH_REDIRECT_URI first",
         )
 
-    state = secrets.token_urlsafe(24)
-    oauth_states.add(state)
+    state = create_oauth_state(settings)
     query = urlencode(
         {
             "response_type": "code",
@@ -209,9 +256,8 @@ async def homey_oauth_authorize_url() -> dict[str, Any]:
 async def homey_oauth_callback(code: str = "", state: str = "") -> dict[str, Any]:
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing OAuth2 code or state")
-    if state not in oauth_states:
+    if not validate_oauth_state(state, settings):
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth2 state")
-    oauth_states.remove(state)
     if not oauth_client_configured(settings):
         raise HTTPException(
             status_code=400,
