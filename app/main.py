@@ -87,20 +87,26 @@ def homey_auth_configured(current_settings: Settings) -> bool:
 
 def homey_readiness_snapshot(current_settings: Settings, config: AppConfig) -> dict[str, Any]:
     auth_configured = homey_auth_configured(current_settings)
+    caller_auth_configured = proxy_auth_enabled(current_settings)
     allowlist_configured = bool(config.allowed_flows)
     command_map_configured = bool(config.command_map)
     local_runtime_configured = current_settings.homey_transport == "local" and not current_settings.homey_use_mock
     ready_for_live_test = (
         local_runtime_configured
+        and caller_auth_configured
         and auth_configured
         and allowlist_configured
         and command_map_configured
     )
 
-    next_step = "Switch HOMEY_USE_MOCK=false only after Homey auth is configured."
+    next_step = "Configure PROXY_API_KEY and Homey auth before switching HOMEY_USE_MOCK=false."
     if current_settings.homey_use_mock:
-        if auth_configured:
+        if not caller_auth_configured:
+            next_step = "Set PROXY_API_KEY before switching HOMEY_USE_MOCK=false."
+        elif auth_configured:
             next_step = "Set HOMEY_USE_MOCK=false and run /homey/readiness?live=true."
+    elif not caller_auth_configured:
+        next_step = "Set PROXY_API_KEY before allowing live Homey calls."
     elif not auth_configured:
         next_step = "Configure Homey auth before testing live Homey calls."
     elif not allowlist_configured:
@@ -116,7 +122,7 @@ def homey_readiness_snapshot(current_settings: Settings, config: AppConfig) -> d
         "homey_base_url": current_settings.homey_base_url,
         "homey_transport": current_settings.homey_transport,
         "homey_auth_mode": current_settings.homey_auth_mode,
-        "proxy_auth_enabled": proxy_auth_enabled(current_settings),
+        "proxy_auth_enabled": caller_auth_configured,
         "auth_configured": auth_configured,
         "allowlist_configured": allowlist_configured,
         "allowed_flow_count": len(config.allowed_flows),

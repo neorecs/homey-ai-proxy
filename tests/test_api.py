@@ -57,6 +57,30 @@ def test_homey_auth_configured_rejects_placeholder_static_token() -> None:
     assert has_real_secret("replace-with-anything") is False
 
 
+def test_homey_readiness_requires_proxy_key_for_real_homey() -> None:
+    from app import main
+
+    previous_use_mock = main.settings.homey_use_mock
+    previous_proxy_key = main.settings.proxy_api_key
+    previous_token = main.settings.homey_token
+    try:
+        main.settings.homey_use_mock = False
+        main.settings.proxy_api_key = ""
+        main.settings.homey_token = "session-token"
+        response = client.get("/homey/readiness")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["mock_mode"] is False
+        assert body["proxy_auth_enabled"] is False
+        assert body["auth_configured"] is True
+        assert body["ready_for_live_test"] is False
+        assert body["next_step"] == "Set PROXY_API_KEY before allowing live Homey calls."
+    finally:
+        main.settings.homey_use_mock = previous_use_mock
+        main.settings.proxy_api_key = previous_proxy_key
+        main.settings.homey_token = previous_token
+
+
 def test_homey_readiness_live_uses_mock_status() -> None:
     response = client.get("/homey/readiness?live=true")
     assert response.status_code == 200
