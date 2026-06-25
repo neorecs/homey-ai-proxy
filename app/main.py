@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from app.cache import TTLCache
@@ -41,7 +41,7 @@ SECRET_PLACEHOLDERS = {
     "change-me",
     "todo",
 }
-PUBLIC_PATHS = {"/health", "/homey/oauth/callback"}
+PUBLIC_PATHS = {"/health", "/setup", "/homey/oauth/callback"}
 OAUTH_STATE_TTL_SECONDS = 15 * 60
 
 
@@ -237,6 +237,99 @@ def validate_oauth_state(state: str, current_settings: Settings) -> bool:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "timestamp": utc_now()}
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page() -> str:
+    return """<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Homey AI Proxy Setup</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; padding: 24px; background: #101418; color: #f4f7fb; }
+    main { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 28px; margin: 0 0 16px; }
+    label { display: block; margin: 18px 0 8px; font-weight: 650; }
+    input { width: 100%; box-sizing: border-box; padding: 12px; border-radius: 6px; border: 1px solid #4a5563; background: #151b22; color: #f4f7fb; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+    button, a.button { border: 0; border-radius: 6px; padding: 11px 14px; background: #2d6cdf; color: white; font-weight: 650; text-decoration: none; cursor: pointer; }
+    button.secondary { background: #3b4652; }
+    pre { white-space: pre-wrap; word-break: break-word; min-height: 180px; padding: 16px; border-radius: 6px; background: #06080a; border: 1px solid #26313b; }
+    .hint { color: #aab7c4; line-height: 1.5; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Homey AI Proxy Setup</h1>
+  <p class="hint">Vul je PROXY_API_KEY in. De key blijft alleen in dit browserveld en wordt als X-API-Key header naar je eigen proxy gestuurd.</p>
+  <label for="apiKey">PROXY_API_KEY</label>
+  <input id="apiKey" type="password" autocomplete="off" placeholder="Plak je proxy key">
+  <div class="actions">
+    <button onclick="callProxy('/homey/readiness')">Readiness</button>
+    <button onclick="callProxy('/homey/readiness?live=true')">Live Readiness</button>
+    <button onclick="getAuthorizeUrl()">OAuth URL</button>
+    <button class="secondary" onclick="clearOutput()">Wis output</button>
+  </div>
+  <pre id="output">Klaar.</pre>
+</main>
+<script>
+const output = document.getElementById('output');
+function key() {
+  return document.getElementById('apiKey').value.trim();
+}
+function write(value) {
+  output.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+function clearOutput() {
+  write('Klaar.');
+}
+async function callProxy(path) {
+  if (!key()) {
+    write('Vul eerst je PROXY_API_KEY in.');
+    return;
+  }
+  try {
+    const response = await fetch(path, { headers: { 'X-API-Key': key() } });
+    const text = await response.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = text; }
+    write({ status: response.status, body });
+  } catch (error) {
+    write(String(error));
+  }
+}
+async function getAuthorizeUrl() {
+  if (!key()) {
+    write('Vul eerst je PROXY_API_KEY in.');
+    return;
+  }
+  try {
+    const response = await fetch('/homey/oauth/authorize-url', { headers: { 'X-API-Key': key() } });
+    const body = await response.json();
+    if (!response.ok) {
+      write({ status: response.status, body });
+      return;
+    }
+    write({ status: response.status, authorization_url: body.authorization_url, next_step: 'Open de link hieronder in deze browser.' });
+    const link = document.createElement('a');
+    link.href = body.authorization_url;
+    link.textContent = 'Open Homey toestemming';
+    link.className = 'button';
+    link.style.display = 'inline-block';
+    link.style.marginTop = '12px';
+    link.target = '_self';
+    output.appendChild(document.createElement('br'));
+    output.appendChild(link);
+  } catch (error) {
+    write(String(error));
+  }
+}
+</script>
+</body>
+</html>"""
 
 
 @app.get("/homey/oauth/authorize-url")

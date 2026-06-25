@@ -14,6 +14,21 @@ def test_health() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_setup_page_is_public_but_does_not_expose_secret() -> None:
+    from app import main
+
+    previous_proxy_key = main.settings.proxy_api_key
+    main.settings.proxy_api_key = "proxy-secret"
+    try:
+        response = client.get("/setup")
+        assert response.status_code == 200
+        assert "Homey AI Proxy Setup" in response.text
+        assert "X-API-Key" in response.text
+        assert "proxy-secret" not in response.text
+    finally:
+        main.settings.proxy_api_key = previous_proxy_key
+
+
 def test_proxy_api_key_protects_homey_endpoints() -> None:
     from app import main
 

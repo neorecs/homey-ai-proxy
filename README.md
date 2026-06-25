@@ -69,6 +69,14 @@ Controleer de healthcheck:
 curl http://localhost:8000/health
 ```
 
+Zonder PowerShell kun je de browserhulp openen:
+
+```text
+http://localhost:8000/setup
+```
+
+Op Synology is dat bijvoorbeeld `http://10.5.1.150:18080/setup`.
+
 ## Synology / Portainer
 
 1. Plaats de repository op je NAS, bijvoorbeeld in een Docker-map.
