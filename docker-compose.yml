@@ -14,7 +14,7 @@ services:
       PROXY_API_KEY: ${PROXY_API_KEY:-}
       HOMEY_BASE_URL: ${HOMEY_BASE_URL:-http://homey.local}
       HOMEY_TOKEN: ${HOMEY_TOKEN:-}
-      HOMEY_USE_MOCK: ${HOMEY_USE_MOCK:-true}
+      HOMEY_USE_MOCK: ${HOMEY_USE_MOCK:-false}
       HOMEY_TRANSPORT: ${HOMEY_TRANSPORT:-local}
       HOMEY_AUTH_MODE: ${HOMEY_AUTH_MODE:-static_token}
       HOMEY_OAUTH_CLIENT_ID: ${HOMEY_OAUTH_CLIENT_ID:-}
